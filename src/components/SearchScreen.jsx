@@ -44,9 +44,7 @@ const style = {
     marginBottom: '20px',
     boxSizing: 'border-box',
   },
-  section: {
-    marginBottom: '24px',
-  },
+  section: { marginBottom: '24px' },
   sectionTitle: {
     fontSize: '1.2rem',
     fontWeight: 'bold',
@@ -63,14 +61,9 @@ const style = {
     borderRadius: '8px',
     border: `1px solid ${theme.border}`,
   },
-  personName: {
-    fontSize: '1rem',
-    color: theme.text,
-  },
-  personUsername: {
-    fontSize: '0.85rem',
-    color: theme.muted,
-  },
+  personName: { fontSize: '1rem', color: theme.text },
+  personUsername: { fontSize: '0.85rem', color: theme.muted },
+  actions: { display: 'flex', gap: '8px', alignItems: 'center' },
   followButton: {
     padding: '6px 12px',
     borderRadius: '6px',
@@ -91,6 +84,16 @@ const style = {
     fontFamily: 'Georgia, serif',
     fontSize: '0.9rem',
   },
+  messageButton: {
+    padding: '6px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${theme.border}`,
+    background: 'transparent',
+    color: theme.muted,
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: '0.9rem',
+  },
   postCard: {
     padding: '12px 16px',
     marginBottom: '8px',
@@ -98,19 +101,9 @@ const style = {
     borderRadius: '8px',
     border: `1px solid ${theme.border}`,
   },
-  postBody: {
-    fontSize: '1rem',
-    color: theme.text,
-    marginBottom: '4px',
-  },
-  postHandle: {
-    fontSize: '0.85rem',
-    color: theme.muted,
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '40px 0',
-  },
+  postBody: { fontSize: '1rem', color: theme.text, marginBottom: '4px' },
+  postHandle: { fontSize: '0.85rem', color: theme.muted },
+  emptyState: { textAlign: 'center', padding: '40px 0' },
   trendingTag: {
     display: 'inline-block',
     padding: '8px 12px',
@@ -123,82 +116,67 @@ const style = {
     fontFamily: 'Georgia, serif',
     fontSize: '0.9rem',
   },
-  errorText: {
-    color: '#e05c5c',
-    fontSize: '0.85rem',
-    marginBottom: '12px',
-  },
+  errorText: { color: '#e05c5c', fontSize: '0.85rem', marginBottom: '12px' },
 };
 
 const TRENDING_TAGS = ['#Melancholy', '#Longing', '#3am', '#Rage', '#Wonder', '#Poetry'];
 
-const SearchScreen = ({ user }) => {
+const SearchScreen = ({ user, onOpenChat }) => {
   const [query, setQuery] = useState('');
   const [people, setPeople] = useState([]);
   const [posts, setPosts] = useState([]);
   const [followingMap, setFollowingMap] = useState(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  // Track in-flight follow operations to prevent race conditions
   const pendingFollows = useRef(new Set());
 
   const fetchFollowing = async () => {
     if (!user?.id) return;
-
     const { data, error } = await supabase
       .from('follows')
       .select('following_id')
       .eq('follower_id', user.id);
-
-    if (error) {
-      console.error('Error fetching follows:', error);
-      return;
-    }
-
+    if (error) { console.error('Error fetching follows:', error); return; }
     const map = new Map();
-    data.forEach(row => map.set(row.following_id, true));
+    (data || []).forEach(row => map.set(row.following_id, true));
     setFollowingMap(map);
   };
 
   const search = async (searchQuery) => {
-    if (!searchQuery.trim()) {
-      setPeople([]);
-      setPosts([]);
-      return;
-    }
+    const trimmed = searchQuery.trim();
+    if (!trimmed) { setPeople([]); setPosts([]); return; }
 
-    // FIX 4: Strip leading '#' so tag searches actually match posts/people
-    const cleanQuery = searchQuery.startsWith('#')
-      ? searchQuery.slice(1)
-      : searchQuery;
-
+    const cleanQuery = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
     setLoading(true);
     setError(null);
 
+    let peopleQuery = supabase
+      .from('profiles')
+      .select('id, name, username')
+      .or(`name.ilike.%${cleanQuery}%,username.ilike.%${cleanQuery}%`)
+      .limit(20);
+
+    if (user?.id) peopleQuery = peopleQuery.neq('id', user.id);
+
     const [peopleRes, postsRes] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, name, username')
-        .or(`name.ilike.%${cleanQuery}%,username.ilike.%${cleanQuery}%`)
-        // FIX 2: Exclude the logged-in user from results
-        .neq('id', user.id),
+      peopleQuery,
       supabase
         .from('posts')
-        .select('id, body, user_handle')
+        .select('id, body, user_handle, user_name')
         .eq('mode', 'public')
         .ilike('body', `%${cleanQuery}%`)
+        .order('created_at', { ascending: false })
+        .limit(30),
     ]);
 
     if (peopleRes.error) {
-      console.error('People search error:', peopleRes.error);
-      setError('Something went wrong while searching people.');
+      setError(`People search failed: ${peopleRes.error.message}`);
     } else {
       setPeople(peopleRes.data || []);
     }
 
     if (postsRes.error) {
-      console.error('Posts search error:', postsRes.error);
-      setError('Something went wrong while searching posts.');
+      setError(`Posts search failed: ${postsRes.error.message}`);
     } else {
       setPosts(postsRes.data || []);
     }
@@ -206,15 +184,11 @@ const SearchScreen = ({ user }) => {
     setLoading(false);
   };
 
-  // FIX 3: Guard against concurrent follow/unfollow clicks with a pending set
   const handleFollow = async (profileId) => {
-    if (!user?.id) return;
-    if (pendingFollows.current.has(profileId)) return; // already in flight
-
+    if (!user?.id || pendingFollows.current.has(profileId)) return;
     pendingFollows.current.add(profileId);
     const isFollowing = followingMap.get(profileId);
 
-    // Optimistic update
     setFollowingMap(prev => {
       const newMap = new Map(prev);
       if (isFollowing) newMap.delete(profileId);
@@ -223,29 +197,21 @@ const SearchScreen = ({ user }) => {
     });
 
     let opError = null;
-
     if (isFollowing) {
-      const { error } = await supabase
-        .from('follows')
-        .delete()
-        .eq('follower_id', user.id)
-        .eq('following_id', profileId);
+      const { error } = await supabase.from('follows').delete()
+        .eq('follower_id', user.id).eq('following_id', profileId);
       opError = error;
     } else {
-      const { error } = await supabase
-        .from('follows')
-        .insert({ follower_id: user.id, following_id: profileId });
+      const { error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: profileId });
       opError = error;
     }
 
-    // FIX 5: Revert optimistic update on error + notify user
     if (opError) {
-      console.error('Follow/unfollow error:', opError);
       setError('Could not update follow status. Please try again.');
       setFollowingMap(prev => {
         const newMap = new Map(prev);
-        if (isFollowing) newMap.set(profileId, true); // revert unfollow
-        else newMap.delete(profileId);                // revert follow
+        if (isFollowing) newMap.set(profileId, true);
+        else newMap.delete(profileId);
         return newMap;
       });
     }
@@ -253,16 +219,12 @@ const SearchScreen = ({ user }) => {
     pendingFollows.current.delete(profileId);
   };
 
-  useEffect(() => {
-    fetchFollowing();
-  }, [user]);
+  useEffect(() => { fetchFollowing(); }, [user]);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (user?.id) search(query);
-    }, 300);
+    const timeoutId = setTimeout(() => { search(query); }, 300);
     return () => clearTimeout(timeoutId);
-  }, [query, user]);
+  }, [query]);
 
   if (!user?.id) {
     return (
@@ -281,24 +243,17 @@ const SearchScreen = ({ user }) => {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={style.searchInput}
+          autoFocus
         />
 
         {error && <p style={style.errorText}>{error}</p>}
-
         {loading && <p style={{ color: theme.muted }}>Searching...</p>}
 
         {!query.trim() && !loading && (
           <div style={style.emptyState}>
             <p style={{ color: theme.muted, marginBottom: '16px' }}>Trending tags</p>
             {TRENDING_TAGS.map(tag => (
-              <span
-                key={tag}
-                style={style.trendingTag}
-                // FIX 4: Tag clicks set the full tag as display but search strips '#'
-                onClick={() => setQuery(tag)}
-              >
-                {tag}
-              </span>
+              <span key={tag} style={style.trendingTag} onClick={() => setQuery(tag)}>{tag}</span>
             ))}
           </div>
         )}
@@ -313,17 +268,25 @@ const SearchScreen = ({ user }) => {
                 people.map(person => (
                   <div key={person.id} style={style.personCard}>
                     <div>
-                      <div style={style.personName}>{person.name}</div>
-                      <div style={style.personUsername}>@{person.username}</div>
+                      <div style={style.personName}>{person.name || 'Unnamed'}</div>
+                      <div style={style.personUsername}>@{person.username || 'unknown'}</div>
                     </div>
-                    <button
-                      style={followingMap.get(person.id) ? style.followingButton : style.followButton}
-                      onClick={() => handleFollow(person.id)}
-                      // FIX 3: Visually disable while pending
-                      disabled={pendingFollows.current.has(person.id)}
-                    >
-                      {followingMap.get(person.id) ? 'Following' : 'Follow'}
-                    </button>
+                    <div style={style.actions}>
+                      {/* 💬 Message button — opens chat with this person */}
+                      <button
+                        style={style.messageButton}
+                        onClick={() => onOpenChat && onOpenChat(person.id)}
+                      >
+                        💬
+                      </button>
+                      <button
+                        style={followingMap.get(person.id) ? style.followingButton : style.followButton}
+                        onClick={() => handleFollow(person.id)}
+                        disabled={pendingFollows.current.has(person.id)}
+                      >
+                        {followingMap.get(person.id) ? 'Following' : 'Follow'}
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -336,10 +299,9 @@ const SearchScreen = ({ user }) => {
               ) : (
                 posts.map(post => (
                   <div key={post.id} style={style.postCard}>
-                    {/* FIX 6: Fallback if user_handle is null */}
                     <div style={style.postBody}>{post.body}</div>
                     <div style={style.postHandle}>
-                      {post.user_handle ? `@${post.user_handle}` : 'unknown'}
+                      {post.user_handle ? `@${post.user_handle}` : post.user_name || 'unknown'}
                     </div>
                   </div>
                 ))
