@@ -1,0 +1,48 @@
+/* App layout */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.app {
+  min-height: 100%;
+  background: #080808;
+  color: #e0e0e0;
+}
+
+.layout {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  padding: 24px 20px;
+  box-sizing: border-box;
+}
+
+.sidebar--left {
+  width: 240px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar--right {
+  width: 280px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.logo {
+  font-family: Georgia, serif;
+  color: #EDE8DF;
+  letter-spacing: 0.3em;
+  font-size: 1.25rem;
+  margin: 0 0 1.5rem 0;
+}
+
+.feed {
+  flex: 1;
+  padding: 24px 20px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
